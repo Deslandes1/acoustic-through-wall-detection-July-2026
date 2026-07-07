@@ -174,7 +174,7 @@ if "lang" not in st.session_state:
 # ---------- SIDEBAR ----------
 with st.sidebar:
     st.image("https://github.com/Deslandes1/Let-s-Learn-Mathematics-with-Gesner/blob/main/Gesner%20Deslandes.png?raw=true", width=150)
-    st.markdown("<h3 style='text-align: center; color: #1a2a3a;'>Gesner Deslandes</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center; color: #4a2c6a;'>Gesner Deslandes</h3>", unsafe_allow_html=True)
     st.markdown("---")
     
     # Language selection
@@ -248,6 +248,87 @@ with st.sidebar:
     real_volume = st.slider(t["volume"], 0.1, 1.0, 0.5, step=0.05, key="real_volume")
     real_max_dist = st.slider(t["max_distance"], 50, 500, 200, step=10, key="real_max_dist")
 
+# ---------- LIGHT PURPLE STYLING ----------
+st.markdown("""
+<style>
+    .stApp {
+        background: linear-gradient(145deg, #f3e5ff 0%, #d9b3ff 100%);
+        color: #2a1a3a;
+    }
+    [data-testid="stSidebar"] {
+        background: #f0e6ff;
+        border-right: 1px solid #c4a0e8;
+    }
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stCaption {
+        color: #2a1a3a !important;
+    }
+    .main-title {
+        text-align: center;
+        padding: 1.2rem;
+        background: linear-gradient(135deg, #b380ff, #d9b3ff);
+        border-radius: 15px;
+        margin-bottom: 1.5rem;
+        color: white;
+        box-shadow: 0 4px 12px rgba(128, 0, 255, 0.15);
+    }
+    .main-title h1 { margin: 0; font-size: 2.5rem; color: white; }
+    .main-title p { margin: 0.5rem 0 0; opacity: 0.95; color: #f0e6ff; }
+    h1, h2, h3, h4, h5, h6, p, li, .stMarkdown, .stCaption, label {
+        color: #2a1a3a !important;
+    }
+    .stButton>button {
+        background: linear-gradient(135deg, #b380ff, #9a66d9) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        box-shadow: 0 2px 8px rgba(128, 0, 255, 0.2);
+    }
+    .stButton>button:hover {
+        transform: scale(1.02);
+        box-shadow: 0 4px 16px rgba(128, 0, 255, 0.3);
+    }
+    .stSlider>div>div>div>div {
+        background: #b380ff !important;
+    }
+    .stSelectbox>div>div>div {
+        background-color: #f5edff !important;
+        border: 1px solid #c4a0e8 !important;
+    }
+    .stCheckbox>label {
+        color: #2a1a3a !important;
+    }
+    .stTabs [role="tab"] {
+        color: #4a2c6a !important;
+        background: rgba(179, 128, 255, 0.2) !important;
+        border-radius: 10px;
+        margin: 0 4px;
+    }
+    .stTabs [role="tab"][aria-selected="true"] {
+        background: rgba(179, 128, 255, 0.5) !important;
+        color: #2a1a3a !important;
+        font-weight: 600;
+    }
+    .result-box {
+        background: rgba(255,255,255,0.6);
+        border-radius: 10px;
+        padding: 15px;
+        border: 1px solid #c4a0e8;
+        margin: 10px 0;
+        backdrop-filter: blur(8px);
+    }
+    .footer {
+        text-align: center;
+        padding: 20px 0;
+        border-top: 1px solid #c4a0e8;
+        margin-top: 30px;
+        color: #4a2c6a;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- MAIN ----------
 t = TEXTS[st.session_state.lang]
 st.markdown(f"""
@@ -312,7 +393,8 @@ with tab1:
                                  textposition="top center", name="Source"))
         fig.update_layout(xaxis_title="Distance (m)", yaxis_title="Position",
                           xaxis_range=[-0.1, 2.5], yaxis_range=[-0.8, 0.8],
-                          height=350, margin=dict(l=20, r=20, t=20, b=20), showlegend=True)
+                          height=350, margin=dict(l=20, r=20, t=20, b=20), showlegend=True,
+                          plot_bgcolor="rgba(255,255,255,0.3)", paper_bgcolor="rgba(255,255,255,0.3)")
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader(t["signal_plot"])
@@ -323,7 +405,8 @@ with tab1:
             fig2.add_trace(go.Scatter(x=peak_times, y=peak_heights, mode="markers",
                                       marker=dict(size=10, color="red"), name="Detected Peaks"))
         fig2.update_layout(xaxis_title="Time (µs)", yaxis_title="Amplitude",
-                           height=300, margin=dict(l=20, r=20, t=20, b=20))
+                           height=300, margin=dict(l=20, r=20, t=20, b=20),
+                           plot_bgcolor="rgba(255,255,255,0.3)", paper_bgcolor="rgba(255,255,255,0.3)")
         st.plotly_chart(fig2, use_container_width=True)
 
     with col2:
@@ -361,16 +444,16 @@ with tab2:
             <style>
                 body {{ background: transparent; font-family: sans-serif; }}
                 #status {{ padding: 10px; margin: 10px 0; border-radius: 5px; background: #1e2a3a; color: white; }}
-                .btn {{ padding: 10px 20px; background: #4a90d9; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }}
+                .btn {{ padding: 10px 20px; background: #9a66d9; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }}
                 .btn:disabled {{ opacity: 0.5; cursor: not-allowed; }}
-                .btn:hover {{ background: #357abd; }}
+                .btn:hover {{ background: #b380ff; }}
                 #result {{ margin-top: 10px; padding: 10px; background: #0e1117; border-radius: 5px; color: #00ff64; font-family: monospace; }}
-                .dist {{ font-size: 24px; color: #4a90d9; font-weight: bold; }}
+                .dist {{ font-size: 24px; color: #b380ff; font-weight: bold; }}
                 .err {{ color: #ff6b6b; }}
-                .report-box {{ background: #1a1a2e; border-radius: 8px; padding: 15px; margin-top: 15px; border-left: 4px solid #4a90d9; }}
+                .report-box {{ background: #1a1a2e; border-radius: 8px; padding: 15px; margin-top: 15px; border-left: 4px solid #b380ff; }}
                 .report-box pre {{ white-space: pre-wrap; font-family: sans-serif; color: #ddd; margin: 0; }}
-                .download-btn {{ background: #2ecc71; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px; margin-top: 10px; }}
-                .download-btn:hover {{ background: #27ae60; }}
+                .download-btn {{ background: #9a66d9; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px; margin-top: 10px; }}
+                .download-btn:hover {{ background: #b380ff; }}
             </style>
         </head>
         <body>
