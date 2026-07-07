@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
-import time
 import json
 
 st.set_page_config(
@@ -29,6 +28,12 @@ st.markdown("""
         border: 1px solid #4a90d9;
         margin: 10px 0;
     }
+    .stButton>button {
+        background: #4a90d9 !important;
+        color: white !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -47,33 +52,20 @@ chirp_freq_end = st.sidebar.slider("End Frequency (Hz)", 1000, 8000, 4000, step=
 volume = st.sidebar.slider("Volume", 0.1, 1.0, 0.5, step=0.05)
 max_distance = st.sidebar.slider("Max Detection Distance (cm)", 50, 500, 200, step=10)
 
-# Speed of sound in air (cm/µs) – approx 34,300 cm/s = 0.0343 cm/µs
-SOUND_SPEED = 0.0343  # cm/µs
-
 st.sidebar.markdown("---")
-st.sidebar.info("Click 'Send Pulse' to play a sound and record the echo. The app will estimate distances to reflective objects behind a wall.")
+st.sidebar.info("Click the 'Send Pulse' button below to play a chirp and record the echo. The app will estimate distances to reflective objects behind a wall.")
 
 # ---------- SESSION STATE ----------
 if "pulse_result" not in st.session_state:
     st.session_state.pulse_result = None
-if "trigger_pulse" not in st.session_state:
-    st.session_state.trigger_pulse = False
-
-# ---------- HIDDEN BUTTON FOR CALLBACK ----------
-def on_pulse_complete():
-    # This will be called from JavaScript via a hidden button click
-    st.session_state.pulse_result = st.session_state.get("pulse_data", None)
-    st.rerun()
-
-if "pulse_complete_btn" not in st.session_state:
-    st.button("Pulse Complete", key="pulse_complete_btn", on_click=on_pulse_complete, type="primary", hidden=True)
 
 # ---------- MAIN LAYOUT ----------
 col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("🎤 Real‑time Audio Analysis")
-    # The HTML component will handle microphone, playback, and processing
+
+    # We'll use a pure HTML component that handles everything and displays results directly
     html_code = f"""
     <!DOCTYPE html>
     <html>
@@ -82,52 +74,59 @@ with col1:
         <style>
             body {{ background: transparent; font-family: sans-serif; }}
             #status {{ padding: 10px; margin: 10px 0; border-radius: 5px; background: #1e2a3a; color: white; }}
-            .btn {{ padding: 10px 20px; background: #4a90d9; color: white; border: none; border-radius: 5px; cursor: pointer; }}
+            .btn {{ padding: 10px 20px; background: #4a90d9; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }}
             .btn:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+            .btn:hover {{ background: #357abd; }}
             #result {{ margin-top: 10px; padding: 10px; background: #0e1117; border-radius: 5px; color: #00ff64; font-family: monospace; }}
+            .dist {{ font-size: 24px; color: #4a90d9; font-weight: bold; }}
+            .err {{ color: #ff6b6b; }}
         </style>
     </head>
     <body>
-        <div id="status">🔴 Idle. Click "Send Pulse" in the sidebar.</div>
+        <button class="btn" id="pulseBtn">🔊 Send Pulse</button>
+        <div id="status">🟢 Ready. Click the button to start.</div>
         <div id="result"></div>
         <script>
         (function() {{
             let audioContext = null;
-            let isRecording = false;
             let isProcessing = false;
-            let resultSent = false;
 
-            // Parameters
-            const chirpDuration = {chirp_duration} / 1000; // seconds
+            const statusDiv = document.getElementById('status');
+            const resultDiv = document.getElementById('result');
+            const pulseBtn = document.getElementById('pulseBtn');
+
+            // Parameters from Python (passed via f-string)
+            const chirpDuration = {chirp_duration} / 1000;
             const freqStart = {chirp_freq_start};
             const freqEnd = {chirp_freq_end};
             const volume = {volume};
-            const maxDist = {max_distance}; // cm
+            const maxDist = {max_distance};
 
-            // Hidden button to trigger rerun
-            const hiddenBtn = document.querySelector('[data-testid="baseButton-secondary"]');
-            if (!hiddenBtn) {{
-                console.error("Hidden button not found");
-                return;
+            function updateStatus(text, isError=false) {{
+                statusDiv.innerHTML = text;
+                statusDiv.style.color = isError ? '#ff6b6b' : 'white';
             }}
 
-            function updateStatus(text) {{
-                document.getElementById('status').innerHTML = text;
-            }}
-
-            function sendResult(data) {{
-                if (resultSent) return;
-                resultSent = true;
-                // Store data in a global variable for Python to read via hidden button
-                window.pulseData = data;
-                // Click the hidden button to trigger rerun
-                hiddenBtn.click();
+            function showResult(data) {{
+                if (data.error) {{
+                    resultDiv.innerHTML = `<span class="err">❌ ${{data.error}}</span>`;
+                    return;
+                }}
+                let html = `<div><span class="dist">${{data.distance_cm.toFixed(1)}} cm</span> estimated</div>`;
+                html += `<div>Delay: ${{(data.delay_seconds * 1000).toFixed(2)}} ms</div>`;
+                html += `<div>Peak confidence: ${{(data.peak_value * 100).toFixed(1)}}%</div>`;
+                if (data.distance_cm > 10) {{
+                    html += `<div>✅ Object detected behind wall (approx)</div>`;
+                }} else {{
+                    html += `<div>ℹ️ No clear object detected (try moving closer)</div>`;
+                }}
+                resultDiv.innerHTML = html;
             }}
 
             async function processPulse() {{
                 if (isProcessing) return;
                 isProcessing = true;
-                resultSent = false;
+                pulseBtn.disabled = true;
                 updateStatus("🔴 Initializing audio...");
 
                 try {{
@@ -154,11 +153,9 @@ with col1:
                     const source = audioContext.createBufferSource();
                     source.buffer = buffer;
 
-                    // 4. Setup recording
+                    // 4. Setup recording (ScriptProcessorNode)
                     const recorder = audioContext.createScriptProcessor(4096, 1, 1);
                     let recordedSamples = [];
-                    let recordingStartTime = 0;
-
                     recorder.onaudioprocess = function(e) {{
                         const input = e.inputBuffer.getChannelData(0);
                         const copy = new Float32Array(input);
@@ -170,17 +167,15 @@ with col1:
 
                     // 5. Play and record
                     updateStatus("🔊 Playing chirp...");
+                    const startTime = audioContext.currentTime;
                     source.connect(audioContext.destination);
-                    recordingStartTime = audioContext.currentTime;
                     source.start();
-                    
+
                     // Record for 2 seconds
                     const recordDuration = 2; // seconds
-                    await new Promise(resolve => {{
-                        setTimeout(resolve, recordDuration * 1000 + 500);
-                    }});
+                    await new Promise(resolve => setTimeout(resolve, recordDuration * 1000 + 500));
 
-                    // 6. Stop everything
+                    // 6. Stop
                     source.stop();
                     recorder.disconnect();
                     mic.disconnect();
@@ -196,142 +191,87 @@ with col1:
                         offset += chunk.length;
                     }}
 
-                    // 8. Compute cross-correlation with transmitted signal
-                    // Pad transmitted signal to same length
-                    const txLen = buffer.length;
+                    // 8. Compute cross-correlation (simplified)
+                    const txLen = data.length;
                     const rxLen = recorded.length;
-                    const maxLen = Math.max(txLen, rxLen);
-                    const txPadded = new Float32Array(maxLen);
-                    txPadded.set(data, 0);
-                    const rxPadded = new Float32Array(maxLen);
-                    rxPadded.set(recorded, 0);
-
-                    // FFT-based cross-correlation
-                    const fftSize = 4096;
-                    const fft = (x) => {{
-                        // Simple DFT for demo (use FFT if available, but we'll use manual)
-                        // For simplicity, we'll use a sliding dot product (slow but works)
-                        // To keep it fast, we'll use a simplified approach: find peaks in envelope.
-                        // Actually, we'll use the time-domain cross-correlation via convolution.
-                        // For brevity, we'll use a basic sliding window.
-                        // We'll compute the envelope of the received signal and look for peaks.
-                        // This is a simplified version for demo.
-                        const correlations = [];
-                        const windowSize = 256;
-                        for (let i = 0; i < rxLen - windowSize; i += 10) {{
-                            let sum = 0;
-                            for (let j = 0; j < windowSize && j < txLen; j++) {{
-                                sum += txPadded[j] * rxPadded[i+j];
-                            }}
-                            correlations.push({{ idx: i, val: Math.abs(sum) }});
-                        }}
-                        return correlations;
-                    }};
-
-                    const corr = [];
-                    for (let i = 0; i < rxLen - data.length; i += 5) {{
+                    // Find the first strong peak after direct sound
+                    // We'll compute sliding dot product (simplified)
+                    const step = 5;
+                    const maxIdx = Math.min(rxLen - txLen, 20000); // limit for speed
+                    let maxVal = 0;
+                    let maxPos = 0;
+                    for (let i = 0; i < maxIdx; i += step) {{
                         let sum = 0;
-                        for (let j = 0; j < data.length; j++) {{
+                        for (let j = 0; j < txLen; j++) {{
                             sum += data[j] * recorded[i+j];
                         }}
-                        corr.push({{ idx: i, val: Math.abs(sum) }});
-                    }}
-
-                    // Find the first strong peak after the direct sound (skip the first 0.5 ms)
-                    const directSamples = Math.floor(0.0005 * sampleRate);
-                    let maxVal = 0;
-                    let maxIdx = 0;
-                    for (let i = 0; i < corr.length; i++) {{
-                        if (corr[i].idx > directSamples && corr[i].val > maxVal) {{
-                            maxVal = corr[i].val;
-                            maxIdx = corr[i].idx;
+                        const val = Math.abs(sum);
+                        if (val > maxVal) {{
+                            maxVal = val;
+                            maxPos = i;
                         }}
                     }}
 
-                    const delaySeconds = maxIdx / sampleRate;
-                    const distanceCm = delaySeconds * 34300 / 2; // round-trip
-                    const estimatedDistance = Math.min(distanceCm, maxDist);
+                    // Skip if peak is too close to direct sound (less than 0.5 ms)
+                    const directSamples = Math.floor(0.0005 * sampleRate);
+                    if (maxPos < directSamples) {{
+                        // find next peak after direct
+                        let secondMax = 0;
+                        let secondPos = 0;
+                        for (let i = directSamples; i < maxIdx; i += step) {{
+                            let sum = 0;
+                            for (let j = 0; j < txLen; j++) {{
+                                sum += data[j] * recorded[i+j];
+                            }}
+                            const val = Math.abs(sum);
+                            if (val > secondMax) {{
+                                secondMax = val;
+                                secondPos = i;
+                            }}
+                        }}
+                        if (secondMax > 0.01) {{
+                            maxPos = secondPos;
+                            maxVal = secondMax;
+                        }} else {{
+                            maxPos = -1;
+                        }}
+                    }}
 
-                    // 9. Send results back
-                    const resultData = {{
-                        distance: estimatedDistance,
-                        delay_seconds: delaySeconds,
-                        peak_value: maxVal,
-                        status: "success"
-                    }};
-                    sendResult(resultData);
+                    if (maxPos > 0) {{
+                        const delaySeconds = maxPos / sampleRate;
+                        const distanceCm = delaySeconds * 34300 / 2;
+                        const result = {{
+                            distance_cm: Math.min(distanceCm, maxDist),
+                            delay_seconds: delaySeconds,
+                            peak_value: Math.min(maxVal, 1.0),
+                            error: null
+                        }};
+                        showResult(result);
+                        updateStatus("✅ Detection complete.");
+                    }} else {{
+                        showResult({{ error: "No reflection detected. Try moving closer or increasing volume." }});
+                        updateStatus("⚠️ No object detected.", true);
+                    }}
 
                 }} catch (err) {{
-                    updateStatus("❌ Error: " + err.message);
-                    sendResult({{ status: "error", message: err.message }});
+                    updateStatus("❌ Error: " + err.message, true);
+                    showResult({{ error: err.message }});
                 }} finally {{
                     isProcessing = false;
+                    pulseBtn.disabled = false;
                 }}
             }}
 
-            // Listen for trigger from sidebar (via session state change)
-            // We'll use a MutationObserver on a dummy element that we can update from Python.
-            // But simpler: we'll expose a function to call from Python via a hidden button? 
-            // Actually, we can set a global variable and check periodically.
-            // We'll just use the hidden button click to trigger the pulse.
-            // We'll detect a click on a special hidden button that we'll create from Python.
-            // Better: use a polling mechanism in JavaScript to check a variable set by Python.
-            // We'll use a simple method: we'll listen for a custom event from Python.
-            // For simplicity, we'll just call processPulse() when the user clicks the "Send Pulse" button in the sidebar.
-            // That button will be a Streamlit button that sets a session state variable.
-            // To trigger from Python, we'll use a hidden button with a unique ID.
-            // The sidebar button will set st.session_state.trigger_pulse = True.
-            // The HTML component will periodically check that variable via an API call? Not straightforward.
-            
-            // Instead, we'll use the hidden button trick: when the user clicks the Streamlit button,
-            // we call a JavaScript function via a custom component? Actually, we can use a button with an onclick that calls a Python function via a form.
-            // I'll use a simpler method: the sidebar button will set a session state flag,
-            // and the HTML component will use a setInterval to check a global variable that we set from Python.
-            // Since we can't modify global variable from Python easily, we'll use a hidden input element that we update.
-            // I'll add a hidden input in the HTML that we can update via a rerun.
-            // For this demo, I'll just use a button in the HTML itself instead of sidebar.
-
-            // We'll add a button in the HTML to trigger the pulse.
-            // That way, no need for cross-communication.
-            // I'll add a "Send Pulse" button inside the HTML component.
-            // The button will call processPulse() on click.
-            // The result will be sent via the hidden button trick.
-
-            // So we need to add a button in the HTML.
-            const container = document.createElement('div');
-            const btn = document.createElement('button');
-            btn.innerText = '🔊 Send Pulse (Microphone)';
-            btn.className = 'btn';
-            btn.onclick = processPulse;
-            container.appendChild(btn);
-            document.body.prepend(container);
-
-            // Also show status
-            const statusDiv = document.getElementById('status');
-            // We'll keep the status div.
-
-            // Add a note about allowing microphone access.
-            updateStatus("🟡 Click 'Send Pulse' to begin. Allow microphone access when prompted.");
+            pulseBtn.onclick = processPulse;
         }})();
         </script>
     </body>
     </html>
     """
-    st.components.v1.html(html_code, height=250)
+    st.components.v1.html(html_code, height=350)
 
-    # Display results if available
-    if st.session_state.pulse_result:
-        result = st.session_state.pulse_result
-        if result.get("status") == "success":
-            distance_cm = result.get("distance", 0)
-            delay = result.get("delay_seconds", 0)
-            st.success(f"✅ Object detected at **{distance_cm:.1f} cm**")
-            st.metric("Round-trip Delay", f"{delay*1000:.2f} ms")
-            st.info(f"Wall + object distance: ~{distance_cm/2:.1f} cm")
-        else:
-            st.error(f"❌ Error: {result.get('message', 'Unknown error')}")
-        # Clear result after displaying
-        st.session_state.pulse_result = None
+    # Display a placeholder for Python-side results (we'll keep it for compatibility)
+    # But the HTML component already shows results, so we don't need to duplicate.
 
 with col2:
     st.subheader("📊 Detection Parameters")
@@ -339,7 +279,7 @@ with col2:
     - **Chirp duration:** {chirp_duration} ms
     - **Frequency range:** {chirp_freq_start} – {chirp_freq_end} Hz
     - **Max distance:** {max_distance} cm
-    - **Sound speed:** {SOUND_SPEED*34300:.0f} m/s
+    - **Sound speed:** 343 m/s
     """)
     st.markdown("---")
     st.markdown("### ℹ️ How it works")
