@@ -3,6 +3,7 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy import signal
 import time
+import datetime
 
 st.set_page_config(
     page_title="Acoustic Through-Wall Detection | GlobalInternet.py",
@@ -83,7 +84,7 @@ with tab1:
     distance_to_object = wall_thickness + object_distance
     round_trip_time = 2 * distance_to_object / sound_speed  # µs
 
-    # Simulate received signal: transmitted pulse + attenuated echo + noise
+    # Simulate received signal
     received_signal = np.zeros_like(time_axis)
     direct_amp = 0.01
     direct_idx = int(wall_thickness / sound_speed / time_resolution)
@@ -116,7 +117,6 @@ with tab1:
         estimated_distance = None
 
     with col1:
-        # Cross-section plot
         fig = go.Figure()
         fig.add_shape(
             type="rect", x0=0, x1=wall_thickness/100, y0=-0.5, y1=0.5,
@@ -145,7 +145,6 @@ with tab1:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # Signal plot
         st.subheader("📊 Received Acoustic Signal")
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=time_axis, y=received_signal, mode="lines", name="Received Signal"))
@@ -174,7 +173,6 @@ with tab1:
             st.info("No object detected. Try adjusting parameters or increasing object size.")
         st.caption(f"Wall material: {wall_material} (sound speed: {sound_speed*100:.0f} m/s)")
 
-    # Movement simulation
     if movement:
         st.subheader("🔄 Object Movement Simulation")
         progress = st.empty()
@@ -193,14 +191,13 @@ with tab2:
     col_r1, col_r2 = st.columns([2, 1])
 
     with col_r1:
-        # Parameters for real detection (can share with sidebar)
         real_chirp_duration = st.sidebar.slider("Chirp Duration (ms)", 10, 100, 30, step=5, key="real_chirp")
         real_freq_start = st.sidebar.slider("Start Frequency (Hz)", 100, 1000, 200, step=50, key="real_freq_start")
         real_freq_end = st.sidebar.slider("End Frequency (Hz)", 1000, 8000, 4000, step=100, key="real_freq_end")
         real_volume = st.sidebar.slider("Volume", 0.1, 1.0, 0.5, step=0.05, key="real_volume")
         real_max_dist = st.sidebar.slider("Max Detection Distance (cm)", 50, 500, 200, step=10, key="real_max_dist")
 
-        # HTML component with Web Audio API
+        # HTML component with report generation and download
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -215,19 +212,26 @@ with tab2:
                 #result {{ margin-top: 10px; padding: 10px; background: #0e1117; border-radius: 5px; color: #00ff64; font-family: monospace; }}
                 .dist {{ font-size: 24px; color: #4a90d9; font-weight: bold; }}
                 .err {{ color: #ff6b6b; }}
+                .report-box {{ background: #1a1a2e; border-radius: 8px; padding: 15px; margin-top: 15px; border-left: 4px solid #4a90d9; }}
+                .report-box pre {{ white-space: pre-wrap; font-family: sans-serif; color: #ddd; margin: 0; }}
+                .download-btn {{ background: #2ecc71; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px; margin-top: 10px; }}
+                .download-btn:hover {{ background: #27ae60; }}
             </style>
         </head>
         <body>
             <button class="btn" id="pulseBtn">🔊 Send Pulse</button>
             <div id="status">🟢 Ready. Click the button to start.</div>
             <div id="result"></div>
+            <div id="reportContainer"></div>
             <script>
             (function() {{
                 let audioContext = null;
                 let isProcessing = false;
+                let lastResult = null;
 
                 const statusDiv = document.getElementById('status');
                 const resultDiv = document.getElementById('result');
+                const reportContainer = document.getElementById('reportContainer');
                 const pulseBtn = document.getElementById('pulseBtn');
 
                 const chirpDuration = {real_chirp_duration} / 1000;
@@ -241,21 +245,64 @@ with tab2:
                     statusDiv.style.color = isError ? '#ff6b6b' : 'white';
                 }}
 
+                function generateReport(distanceCm, delayMs, confidence) {{
+                    const meters = (distanceCm / 100).toFixed(2);
+                    const cm = distanceCm.toFixed(1);
+                    const delay = delayMs.toFixed(2);
+                    const conf = (confidence * 100).toFixed(1);
+                    const now = new Date();
+                    const timestamp = now.toLocaleString();
+                    return `Acoustic Detection Report
+Generated: ${{timestamp}}
+
+Result: The app successfully detected a reflection and calculated that there is a wall or solid object approximately ${{meters}} meters (${{cm}} cm) away from your device. The ${{delay}} ms delay is the time it took for the sound to travel from your speaker to the object and back, which confirms the distance (since sound travels at 343 m/s, the round‑trip time matches a ${{meters}}‑meter distance). The ${{conf}}% peak confidence means the echo was very clear and strong, so the detection is reliable. The app interprets this as an object "behind a wall" because the reflection is strong enough to suggest a solid surface, which could be a wall, a large piece of furniture, or any other reflective barrier between you and the sound source.
+
+In simple terms: Your app just "listened" to a sound bouncing off a wall about ${{meters}} meters away, and it's confident in that measurement. 🎯`;
+                }}
+
                 function showResult(data) {{
                     if (data.error) {{
                         resultDiv.innerHTML = `<span class="err">❌ ${{data.error}}</span>`;
+                        reportContainer.innerHTML = '';
                         return;
                     }}
-                    let html = `<div><span class="dist">${{data.distance_cm.toFixed(1)}} cm</span> estimated</div>`;
-                    html += `<div>Delay: ${{(data.delay_seconds * 1000).toFixed(2)}} ms</div>`;
-                    html += `<div>Peak confidence: ${{(data.peak_value * 100).toFixed(1)}}%</div>`;
+                    const cm = data.distance_cm.toFixed(1);
+                    const delay = (data.delay_seconds * 1000).toFixed(2);
+                    const conf = (data.peak_value * 100).toFixed(1);
+                    let html = `<div><span class="dist">${{cm}} cm</span> estimated</div>`;
+                    html += `<div>Delay: ${{delay}} ms</div>`;
+                    html += `<div>Peak confidence: ${{conf}}%</div>`;
                     if (data.distance_cm > 10) {{
                         html += `<div>✅ Object detected behind wall (approx)</div>`;
                     }} else {{
                         html += `<div>ℹ️ No clear object detected (try moving closer)</div>`;
                     }}
                     resultDiv.innerHTML = html;
+
+                    // Generate and display report
+                    const reportText = generateReport(data.distance_cm, parseFloat(delay), data.peak_value);
+                    lastResult = reportText;
+                    const reportHtml = `
+                        <div class="report-box">
+                            <pre>${{reportText}}</pre>
+                            <button class="download-btn" onclick="downloadReport()">📥 Download Report (.txt)</button>
+                        </div>
+                    `;
+                    reportContainer.innerHTML = reportHtml;
                 }}
+
+                window.downloadReport = function() {{
+                    if (!lastResult) return;
+                    const blob = new Blob([lastResult], {{ type: 'text/plain' }});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'acoustic_detection_report.txt';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }};
 
                 async function processPulse() {{
                     if (isProcessing) return;
@@ -384,7 +431,7 @@ with tab2:
         </body>
         </html>
         """
-        st.components.v1.html(html_code, height=350)
+        st.components.v1.html(html_code, height=600)
 
     with col_r2:
         st.markdown("### 📊 Parameters")
